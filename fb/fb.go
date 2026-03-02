@@ -1,3 +1,6 @@
+//go:build linux
+// +build linux
+
 package fb
 
 /*
@@ -19,7 +22,6 @@ struct fb_var_screeninfo getVarScreenInfo(int fd) {
 import "C"
 import (
 	"errors"
-	log "github.com/sirupsen/logrus"
 	"image"
 	"image/color"
 	"os"
@@ -31,7 +33,7 @@ import (
 // the screen output.
 // The returned Device implements the draw.Image interface. This means that you
 // can use it to copy to and from other images.
-// The only supported color model for the specified frame buffer is RGB565.
+// Supported color models for the specified frame buffer are RGB565 and RGB888.
 // After you are done using the Device, call Close on it to unmap the memory and
 // close the framebuffer file.
 func Open(device string) (*Device, error) {
@@ -54,15 +56,6 @@ func Open(device string) (*Device, error) {
 	}
 
 	var colorModel color.Model
-	log.WithFields(log.Fields{
-		"red length":   varInfo.red.length,
-		"green length": varInfo.green.length,
-		"blue length":  varInfo.blue.length,
-		"red offset":   varInfo.red.offset,
-		"green offset": varInfo.green.offset,
-		"blue offset":  varInfo.blue.offset,
-		"bpp":          varInfo.bits_per_pixel,
-	}).Info("Color model")
 	if varInfo.red.offset == 11 && varInfo.red.length == 5 && varInfo.red.msb_right == 0 &&
 		varInfo.green.offset == 5 && varInfo.green.length == 6 && varInfo.green.msb_right == 0 &&
 		varInfo.blue.offset == 0 && varInfo.blue.length == 5 && varInfo.blue.msb_right == 0 {
@@ -72,6 +65,8 @@ func Open(device string) (*Device, error) {
 		varInfo.blue.offset == 0 && varInfo.blue.length == 8 && varInfo.blue.msb_right == 0 {
 		colorModel = rgb888ColorModel{}
 	} else {
+		syscall.Munmap(pixels)
+		file.Close()
 		return nil, errors.New("unsupported color model")
 	}
 
@@ -116,8 +111,18 @@ func (d *Device) At(x, y int) color.Color {
 		y < d.bounds.Min.Y || y >= d.bounds.Max.Y {
 		return rgb565(0)
 	}
-	i := y*d.pitch + 2*x
-	return rgb565(d.pixels[i+1])<<8 | rgb565(d.pixels[i])
+	if _, ok := d.colorModel.(rgb565ColorModel); ok {
+		i := y*d.pitch + 2*x
+		return rgb565(d.pixels[i+1])<<8 | rgb565(d.pixels[i])
+	}
+
+	i := y*d.pitch + 4*x
+	return color.RGBA{
+		R: d.pixels[i+2],
+		G: d.pixels[i+1],
+		B: d.pixels[i],
+		A: 0xff,
+	}
 }
 
 // Set implements the draw.Image interface.
@@ -137,9 +142,9 @@ func (d *Device) Set(x, y int, c color.Color) {
 				d.pixels[i] = byte(rgb & 0xFF)
 			} else {
 				i := y*d.pitch + 4*x
-				d.pixels[i] = byte(b)
-				d.pixels[i+1] = byte(g)
-				d.pixels[i+2] = byte(r)
+				d.pixels[i] = byte(b >> 8)
+				d.pixels[i+1] = byte(g >> 8)
+				d.pixels[i+2] = byte(r >> 8)
 			}
 		}
 	}

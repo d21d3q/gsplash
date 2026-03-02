@@ -1,0 +1,13 @@
+[Unit]
+Description=Tank Robot framebuffer splash
+After=local-fs.target
+ConditionPathExists=/usr/share/gsplash/gsplash.png
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/gsplash --device /dev/fb0 --image /usr/share/gsplash/gsplash.png --mode contain --background=#000000 --retry 250ms --timeout 30s --wait
+Restart=on-failure
+RestartSec=1
+
+[Install]
+WantedBy=sysinit.target
